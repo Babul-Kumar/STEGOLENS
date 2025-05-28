@@ -40,8 +40,9 @@ export class MemStorage implements IStorage {
   async createUser(insertUser: InsertUser): Promise<User> {
     const id = this.currentUserId++;
     const user: User = { 
-      ...insertUser, 
       id,
+      walletAddress: insertUser.walletAddress,
+      nickname: insertUser.nickname || null,
       createdAt: new Date()
     };
     this.users.set(id, user);
@@ -67,8 +68,17 @@ export class MemStorage implements IStorage {
   async createScanReport(insertReport: InsertScanReport): Promise<ScanReport> {
     const id = this.currentReportId++;
     const report: ScanReport = { 
-      ...insertReport, 
       id,
+      userId: insertReport.userId,
+      imageHash: insertReport.imageHash,
+      ipfsHash: insertReport.ipfsHash,
+      filename: insertReport.filename,
+      fileSize: insertReport.fileSize,
+      threatDetected: insertReport.threatDetected,
+      lsbAnalysis: insertReport.lsbAnalysis || null,
+      metadata: insertReport.metadata || null,
+      heatmapUrl: insertReport.heatmapUrl || null,
+      blockchainTxHash: insertReport.blockchainTxHash || null,
       createdAt: new Date()
     };
     this.scanReports.set(id, report);
