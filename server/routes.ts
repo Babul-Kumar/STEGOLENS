@@ -66,9 +66,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "Wallet address required" });
       }
 
-      const user = await storage.getUserByWalletAddress(walletAddress);
+      let user = await storage.getUserByWalletAddress(walletAddress);
       if (!user) {
-        return res.status(404).json({ error: "User not found" });
+        // Create user if they don't exist
+        user = await storage.createUser({ walletAddress, nickname: null });
       }
 
       // Generate image hash
