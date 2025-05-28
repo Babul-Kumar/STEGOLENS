@@ -38,7 +38,7 @@ export default function WalletConnection() {
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button className="bg-primary-600 hover:bg-primary-700 text-white">
+        <Button className="bg-blue-600 hover:bg-blue-700 text-white border-0">
           <Wallet className="h-4 w-4 mr-2" />
           Connect Wallet
         </Button>
