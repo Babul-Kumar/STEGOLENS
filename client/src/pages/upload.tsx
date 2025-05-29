@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import ImageUpload from "@/components/image-upload";
 import AnalysisResults from "@/components/analysis-results";
 import { useWallet } from "@/hooks/use-wallet";
@@ -7,16 +7,33 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
 import { ArrowLeft, Upload as UploadIcon } from "lucide-react";
+import { ipfsService } from "@/lib/ipfs";
 
 export default function Upload() {
-  const { isConnected } = useWallet();
+  const { isConnected, account } = useWallet();
+  console.log("Upload page - account:", account);
   const [currentReportId, setCurrentReportId] = useState<number | null>(null);
 
-  const { data: currentReport } = useQuery({
+  const { data } = useQuery({
     queryKey: ['/api/analysis', currentReportId],
+    queryFn: async () => {
+      if (!currentReportId) return null;
+      const response = await fetch(`/api/analysis/${currentReportId}`);
+      if (!response.ok) throw new Error('Failed to fetch analysis report');
+      return response.json();
+    },
     enabled: !!currentReportId,
     refetchInterval: currentReportId ? 2000 : false,
   });
+
+  const currentReport = data as { report: any } | undefined;
+
+  useEffect(() => {
+    if (currentReport?.report?.ipfsHash) {
+      console.log("ipfsHash:", currentReport.report.ipfsHash);
+      console.log("imageUrl:", ipfsService.getIPFSUrl(currentReport.report.ipfsHash));
+    }
+  }, [currentReport]);
 
   if (!isConnected) {
     return (
@@ -72,7 +89,11 @@ export default function Upload() {
         
         <div className="xl:col-span-2">
           {currentReport?.report ? (
-            <AnalysisResults report={currentReport.report} />
+            <AnalysisResults 
+              report={currentReport.report} 
+              imageUrl={currentReport.report.ipfsHash ? ipfsService.getIPFSUrl(currentReport.report.ipfsHash) : undefined}
+              heatmapUrl={currentReport.report.heatmapUrl}
+            />
           ) : (
             <Card>
               <CardContent className="p-12 text-center">

@@ -10,15 +10,20 @@ import { ArrowLeft, History as HistoryIcon } from "lucide-react";
 
 export default function History() {
   const { account, isConnected } = useWallet();
+  console.log("History page - account:", account);
   const [selectedReportId, setSelectedReportId] = useState<number | null>(null);
 
   const { data: historyData, isLoading } = useQuery({
     queryKey: ['/api/history', account],
+    queryFn: () => fetch(`/api/history/${account}`).then(res => res.json()),
     enabled: isConnected && !!account,
   });
 
+  console.log("History page - historyData:", historyData);
+
   const { data: selectedReport } = useQuery({
     queryKey: ['/api/analysis', selectedReportId],
+    queryFn: () => fetch(`/api/analysis/${selectedReportId}`).then(res => res.json()),
     enabled: !!selectedReportId,
   });
 

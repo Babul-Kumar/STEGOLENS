@@ -187,7 +187,7 @@ def analyze_image(image_path):
         # Determine if threat is detected
         threat_detected = False
         if 'hidden_data_found' in lsb_analysis:
-            threat_detected = lsb_analysis['hidden_data_found']
+            threat_detected = bool(lsb_analysis['hidden_data_found'])
         
         # Check for suspicious metadata
         suspicious_metadata = check_suspicious_metadata(metadata)

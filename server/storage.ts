@@ -1,3 +1,5 @@
+import sqlite3 from 'sqlite3';
+import { open, Database } from 'sqlite';
 import { users, scanReports, type User, type InsertUser, type ScanReport, type InsertScanReport } from "@shared/schema";
 
 export interface IStorage {
@@ -14,61 +16,126 @@ export interface IStorage {
   updateScanReport(id: number, updates: Partial<ScanReport>): Promise<ScanReport | undefined>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<number, User>;
-  private scanReports: Map<number, ScanReport>;
-  private currentUserId: number;
-  private currentReportId: number;
+export class SqliteStorage implements IStorage {
+  private db!: Database<sqlite3.Database, sqlite3.Statement>;
 
-  constructor() {
-    this.users = new Map();
-    this.scanReports = new Map();
-    this.currentUserId = 1;
-    this.currentReportId = 1;
+  constructor() {}
+
+  async init() {
+    // Ensure data directory exists
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const dataDir = path.join(process.cwd(), 'data');
+    try {
+      await fs.mkdir(dataDir, { recursive: true });
+    } catch (err) {
+      console.error('Failed to create data directory:', err);
+      throw err;
+    }
+
+    this.db = await open({
+      filename: path.join(dataDir, 'stegoguard.db'),
+      driver: sqlite3.Database
+    });
+
+    // Create tables if not exist
+    await this.db.exec("CREATE TABLE IF NOT EXISTS users (\
+      id INTEGER PRIMARY KEY AUTOINCREMENT,\
+      walletAddress TEXT UNIQUE NOT NULL,\
+      nickname TEXT,\
+      createdAt TEXT NOT NULL\
+    );");
+
+    await this.db.exec("CREATE TABLE IF NOT EXISTS scanReports (\
+      id INTEGER PRIMARY KEY AUTOINCREMENT,\
+      userId INTEGER NOT NULL,\
+      imageHash TEXT NOT NULL,\
+      ipfsHash TEXT,\
+      filename TEXT,\
+      fileSize INTEGER,\
+      threatDetected INTEGER,\
+      lsbAnalysis TEXT,\
+      metadata TEXT,\
+      heatmapUrl TEXT,\
+      blockchainTxHash TEXT,\
+      createdAt TEXT NOT NULL,\
+      FOREIGN KEY(userId) REFERENCES users(id)\
+    );");
   }
 
   async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
+    const row = await this.db.get("SELECT * FROM users WHERE id = ?", id);
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      walletAddress: row.walletAddress,
+      nickname: row.nickname,
+      createdAt: new Date(row.createdAt)
+    };
   }
 
   async getUserByWalletAddress(walletAddress: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.walletAddress.toLowerCase() === walletAddress.toLowerCase(),
-    );
+    const row = await this.db.get("SELECT * FROM users WHERE LOWER(walletAddress) = LOWER(?)", walletAddress);
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      walletAddress: row.walletAddress,
+      nickname: row.nickname,
+      createdAt: new Date(row.createdAt)
+    };
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = this.currentUserId++;
-    const user: User = { 
-      id,
+    const now = new Date().toISOString();
+    const result = await this.db.run(
+      "INSERT INTO users (walletAddress, nickname, createdAt) VALUES (?, ?, ?)",
+      insertUser.walletAddress,
+      insertUser.nickname || null,
+      now
+    );
+    return {
+      id: result.lastID!,
       walletAddress: insertUser.walletAddress,
       nickname: insertUser.nickname || null,
-      createdAt: new Date()
+      createdAt: new Date(now)
     };
-    this.users.set(id, user);
-    return user;
   }
 
   async getScanReport(id: number): Promise<ScanReport | undefined> {
-    return this.scanReports.get(id);
+    const row = await this.db.get("SELECT * FROM scanReports WHERE id = ?", id);
+    if (!row) return undefined;
+    return this.rowToScanReport(row);
   }
 
   async getScanReportsByUser(userId: number): Promise<ScanReport[]> {
-    return Array.from(this.scanReports.values())
-      .filter(report => report.userId === userId)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const rows = await this.db.all("SELECT * FROM scanReports WHERE userId = ? ORDER BY datetime(createdAt) DESC", userId);
+    return rows.map(this.rowToScanReport);
   }
 
   async getScanReportByImageHash(imageHash: string): Promise<ScanReport | undefined> {
-    return Array.from(this.scanReports.values()).find(
-      (report) => report.imageHash === imageHash,
-    );
+    const row = await this.db.get("SELECT * FROM scanReports WHERE imageHash = ?", imageHash);
+    if (!row) return undefined;
+    return this.rowToScanReport(row);
   }
 
   async createScanReport(insertReport: InsertScanReport): Promise<ScanReport> {
-    const id = this.currentReportId++;
-    const report: ScanReport = { 
-      id,
+    const now = new Date().toISOString();
+    const result = await this.db.run(
+      "INSERT INTO scanReports (userId, imageHash, ipfsHash, filename, fileSize, threatDetected, lsbAnalysis, metadata, heatmapUrl, blockchainTxHash, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      insertReport.userId,
+      insertReport.imageHash,
+      insertReport.ipfsHash,
+      insertReport.filename,
+      insertReport.fileSize,
+      insertReport.threatDetected ? 1 : 0,
+      insertReport.lsbAnalysis || null,
+      insertReport.metadata || null,
+      insertReport.heatmapUrl || null,
+      insertReport.blockchainTxHash || null,
+      now
+    );
+    return {
+      id: result.lastID!,
       userId: insertReport.userId,
       imageHash: insertReport.imageHash,
       ipfsHash: insertReport.ipfsHash,
@@ -79,20 +146,51 @@ export class MemStorage implements IStorage {
       metadata: insertReport.metadata || null,
       heatmapUrl: insertReport.heatmapUrl || null,
       blockchainTxHash: insertReport.blockchainTxHash || null,
-      createdAt: new Date()
+      createdAt: new Date(now)
     };
-    this.scanReports.set(id, report);
-    return report;
   }
 
   async updateScanReport(id: number, updates: Partial<ScanReport>): Promise<ScanReport | undefined> {
-    const report = this.scanReports.get(id);
-    if (!report) return undefined;
-    
-    const updatedReport = { ...report, ...updates };
-    this.scanReports.set(id, updatedReport);
-    return updatedReport;
+    const existing = await this.getScanReport(id);
+    if (!existing) return undefined;
+
+    const updated = { ...existing, ...updates };
+    await this.db.run(
+      "UPDATE scanReports SET userId = ?, imageHash = ?, ipfsHash = ?, filename = ?, fileSize = ?, threatDetected = ?, lsbAnalysis = ?, metadata = ?, heatmapUrl = ?, blockchainTxHash = ?, createdAt = ? WHERE id = ?",
+      updated.userId,
+      updated.imageHash,
+      updated.ipfsHash,
+      updated.filename,
+      updated.fileSize,
+      updated.threatDetected ? 1 : 0,
+      updated.lsbAnalysis,
+      updated.metadata,
+      updated.heatmapUrl,
+      updated.blockchainTxHash,
+      updated.createdAt.toISOString(),
+      id
+    );
+    return this.getScanReport(id);
+  }
+
+  private rowToScanReport(row: any): ScanReport {
+    return {
+      id: row.id,
+      userId: row.userId,
+      imageHash: row.imageHash,
+      ipfsHash: row.ipfsHash,
+      filename: row.filename,
+      fileSize: row.fileSize,
+      threatDetected: !!row.threatDetected,
+      lsbAnalysis: row.lsbAnalysis,
+      metadata: row.metadata,
+      heatmapUrl: row.heatmapUrl,
+      blockchainTxHash: row.blockchainTxHash,
+      createdAt: new Date(row.createdAt)
+    };
   }
 }
 
-export const storage = new MemStorage();
+// Export an instance and initialize it
+export const storage = new SqliteStorage();
+storage.init();

@@ -8,6 +8,18 @@ import { spawn } from "child_process";
 import path from "path";
 import fs from "fs/promises";
 
+// Extend Express Request type to include 'file' and 'files' for multer
+declare global {
+  namespace Express {
+    interface Request {
+      file?: Express.Multer.File;
+      files?: { [fieldname: string]: Express.Multer.File[] } | Express.Multer.File[];
+    }
+  }
+}
+
+
+// to run use this in terminal $env:NODE_ENV="development"; tsx server/index.ts
 // Configure multer for file uploads
 const upload = multer({
   dest: 'uploads/',
@@ -57,11 +69,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Image upload and analysis routes
   app.post("/api/upload", upload.single('image'), async (req, res) => {
     try {
-      if (!req.file) {
+      const file = req.file as Express.Multer.File | undefined;
+      if (!file) {
         return res.status(400).json({ error: "No image file provided" });
       }
 
-      const { walletAddress } = req.body;
+      const body = req.body as { walletAddress?: string };
+      const walletAddress = body.walletAddress;
       if (!walletAddress) {
         return res.status(400).json({ error: "Wallet address required" });
       }
@@ -73,7 +87,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Generate image hash
-      const fileBuffer = await fs.readFile(req.file.path);
+      const fileBuffer = await fs.readFile(file.path);
       const imageHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
 
       // Check if image was already analyzed
@@ -87,12 +101,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Create initial scan report
+      if (!file) {
+        return res.status(400).json({ error: "No image file provided" });
+      }
       const scanReport = await storage.createScanReport({
         userId: user.id,
         imageHash,
         ipfsHash: '', // Will be updated after analysis
-        filename: req.file.originalname || 'unknown',
-        fileSize: req.file.size,
+        filename: file.originalname || 'unknown',
+        fileSize: file.size,
         threatDetected: false,
         lsbAnalysis: null,
         metadata: null,
@@ -218,16 +235,23 @@ async function analyzeImageAsync(reportId: number, imagePath: string) {
         }
         
         const analysisResult = JSON.parse(result);
+
+        // Upload heatmap image to IPFS (mock)
+        let heatmapIpfsHash = null;
+        if (analysisResult.heatmapUrl) {
+          // In real scenario, upload heatmap image file to IPFS here
+          heatmapIpfsHash = `Qm${crypto.randomBytes(32).toString('hex').substring(0, 44)}`;
+        }
         
-        // Upload to IPFS (mock)
+        // Upload main report to IPFS (mock)
         const ipfsHash = `Qm${crypto.randomBytes(32).toString('hex').substring(0, 44)}`;
         
-        // Update scan report with results
+        // Update scan report with results and heatmap IPFS URL
         await storage.updateScanReport(reportId, {
           threatDetected: analysisResult.threatDetected,
           lsbAnalysis: JSON.stringify(analysisResult.lsbAnalysis),
           metadata: JSON.stringify(analysisResult.metadata),
-          heatmapUrl: analysisResult.heatmapUrl,
+          heatmapUrl: heatmapIpfsHash ? `https://ipfs.io/ipfs/${heatmapIpfsHash}` : null,
           ipfsHash,
           blockchainTxHash: `0x${crypto.randomBytes(32).toString('hex')}`,
         });

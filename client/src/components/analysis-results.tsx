@@ -85,6 +85,11 @@ export default function AnalysisResults({ report, imageUrl, heatmapUrl }: Analys
                     src={imageUrl} 
                     alt="Uploaded image" 
                     className="w-full h-full object-cover rounded-lg"
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.onerror = null;
+                      target.src = "/placeholder-image.png"; // fallback placeholder image
+                    }}
                   />
                 ) : (
                   <span className="text-slate-500">{report.filename}</span>

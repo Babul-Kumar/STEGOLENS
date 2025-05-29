@@ -37,16 +37,19 @@ export default function Dashboard() {
 
   const { data: stats } = useQuery<DashboardStats>({
     queryKey: ['/api/stats', account],
+    queryFn: () => fetch(`/api/stats/${account}`).then(res => res.json()),
     enabled: isConnected && !!account,
   });
 
   const { data: recentReports } = useQuery({
     queryKey: ['/api/history', account],
+    queryFn: () => fetch(`/api/history/${account}`).then(res => res.json()),
     enabled: isConnected && !!account,
   });
 
   const { data: currentReport } = useQuery({
     queryKey: ['/api/analysis', currentReportId],
+    queryFn: () => fetch(`/api/analysis/${currentReportId}`).then(res => res.json()),
     enabled: !!currentReportId,
     refetchInterval: currentReportId ? 2000 : false,
   });
