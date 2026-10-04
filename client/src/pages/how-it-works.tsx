@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { ForensicBackground } from "@/components/forensic-background";
 import {
   Binary,
   Layers,
@@ -254,8 +255,9 @@ export default function HowItWorksPage() {
   const activeMarkerList = selectedFormat === "jpeg" ? jpegMarkers : pngChunks;
 
   return (
-    <div className="min-h-screen py-10 bg-background transition-colors">
-      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
+    <div className="min-h-screen py-10 bg-background relative transition-colors">
+      <ForensicBackground mode="idle" density="sparse" />
+      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 space-y-12 relative z-10">
         
         {/* Header */}
         <div className="space-y-3 pb-6 border-b border-border">
@@ -602,6 +604,35 @@ export default function HowItWorksPage() {
           <p className="text-xs text-muted-foreground leading-relaxed">
             StegoLens utilizes an <strong>EfficientNet-B0</strong> baseline convolutional neural network trained on the <strong>ALASKA2 benchmark</strong> (Test ROC-AUC: 0.685, Weighted AUC: 0.767). The model inspects residual spatial noise patterns across a 512×512 interpolated grid to provide probabilistic detection of adaptive steganographic embeddings. Within the StegoLens forensic pipeline, neural inference functions as one corroborating evidence source rather than definitive standalone proof.
           </p>
+
+          {/* Educational ML Architecture Pipeline Diagram */}
+          <div className="p-4 rounded-xl bg-muted/30 border border-border/80 space-y-3">
+            <span className="text-[10px] font-mono uppercase text-muted-foreground font-semibold block">
+              NEURAL STEGANALYSIS ARCHITECTURE PIPELINE
+            </span>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs font-mono">
+              <div className="p-3 rounded-lg bg-card border border-border space-y-1">
+                <span className="text-[10px] text-primary font-bold">01 • INPUT</span>
+                <div className="font-bold text-foreground">CARRIER IMAGE</div>
+                <p className="text-[10px] text-muted-foreground">512×512 resize, channel normalization</p>
+              </div>
+              <div className="p-3 rounded-lg bg-card border border-border space-y-1">
+                <span className="text-[10px] text-primary font-bold">02 • EXTRACTION</span>
+                <div className="font-bold text-foreground">FEATURE MAPS</div>
+                <p className="text-[10px] text-muted-foreground">Spatial residual high-pass filtering</p>
+              </div>
+              <div className="p-3 rounded-lg bg-card border border-border space-y-1">
+                <span className="text-[10px] text-primary font-bold">03 • NEURAL MODEL</span>
+                <div className="font-bold text-foreground">EFFICIENTNET-B0</div>
+                <p className="text-[10px] text-muted-foreground">Trained on ALASKA2 stego benchmark</p>
+              </div>
+              <div className="p-3 rounded-lg bg-card border border-border space-y-1">
+                <span className="text-[10px] text-primary font-bold">04 • INFERENCE</span>
+                <div className="font-bold text-foreground">STEGANALYSIS SIGNAL</div>
+                <p className="text-[10px] text-muted-foreground">Sigmoid output vs decision threshold</p>
+              </div>
+            </div>
+          </div>
 
           <div className="pt-2">
             <Link href="/analyze">

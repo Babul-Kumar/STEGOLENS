@@ -154,10 +154,16 @@ def run_inference(image_path: str):
         else:
             confidence = "low"
 
-        description = (
-            f"ML model estimates a {prob * 100:.1f}% probability of steganographic embedding "
-            f"(calibrated threshold: {threshold:.2f})."
-        )
+        if prob >= threshold:
+            description = (
+                f"EfficientNet-B0 produced an elevated steganalysis signal of {prob * 100:.1f}%, "
+                f"which exceeds the configured decision threshold ({threshold * 100:.1f}%)."
+            )
+        else:
+            description = (
+                f"ML analysis produced a {prob * 100:.1f}% steganalysis probability, "
+                f"which is below the configured decision threshold ({threshold * 100:.1f}%)."
+            )
 
         return {
             "status": "ready",

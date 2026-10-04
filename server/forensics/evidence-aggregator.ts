@@ -27,17 +27,16 @@ export function aggregateEvidence(
     : 0;
 
   // Determine combined score
-  // Deterministic structural evidence (trailing data, recognized signatures) dominates
   let combinedScore = clampedForensic;
-  const hasStrongForensicEvidence = findings.some(
-    (f) => f.category === "payload" && f.status === "suspicious"
-  ) || findings.some(
+  const hasConfirmedTrailingPayload = findings.some(
+    (f) => f.category === "payload" && f.severity === "high" && f.title.includes("Trailing Data")
+  );
+  const hasTrailingBytes = findings.some(
     (f) => f.category === "structure" && f.title.includes("Trailing Bytes")
   );
 
   if (mlResult.status === "ready" && typeof mlResult.probability === "number") {
-    if (hasStrongForensicEvidence) {
-      // Strong forensic evidence remains primary; ML corroboration boosts confidence
+    if (hasConfirmedTrailingPayload) {
       combinedScore = Math.min(100, Math.round(clampedForensic * 0.8 + mlScore * 0.2));
     } else {
       // Balanced weighting: 60% deterministic forensic + 40% ML neural classification
@@ -47,48 +46,46 @@ export function aggregateEvidence(
 
   const level = calculateSuspicionLevel(combinedScore);
 
-  // Generate explainable overall assessment
+  // Generate explainable, scientifically conservative overall assessment
   let overallAssessment = "";
 
   const suspiciousFindings = findings.filter((f) => f.status === "suspicious");
   const findingSummaries = suspiciousFindings.map((f) => f.title);
+  const hasStreamSignatures = findings.some((f) => f.category === "payload" && f.severity === "low");
 
-  if (mlResult.status === "ready" && mlResult.probability !== null) {
-    const isMlElevated = mlResult.probability >= (mlResult.threshold || 0.22);
-    
-    if (suspiciousFindings.length > 0 && isMlElevated) {
-      overallAssessment = 
-        `Concordant forensic and neural steganalysis signals detected. Deterministic inspection identified ` +
-        `${findingSummaries.join(", ")}, while the EfficientNet-B0 classifier reported elevated probability ` +
-        `(${(mlResult.probability * 100).toFixed(1)}%). Multiple independent indicators exhibit characteristics ` +
-        `consistent with possible steganographic manipulation. Secondary payload verification recommended.`;
-    } else if (suspiciousFindings.length > 0 && !isMlElevated) {
-      overallAssessment = 
-        `Structural forensic anomalies detected (${findingSummaries.join(", ")}), although ML feature probability ` +
-        `remains moderate (${(mlResult.probability * 100).toFixed(1)}%). In forensic examination, deterministic ` +
-        `container anomalies and bit-plane patterns take precedence over neural classification confidence.`;
-    } else if (suspiciousFindings.length === 0 && isMlElevated) {
-      overallAssessment = 
-        `Neural steganalysis model indicates elevated probability (${(mlResult.probability * 100).toFixed(1)}%) ` +
-        `without overt container or bit-plane structural anomalies. This pattern can occur with transform-domain ` +
-        `algorithms (e.g. JMiPOD, JUNIWARD) or high-frequency natural sensor noise. Further targeted DCT analysis warranted.`;
-    } else {
-      overallAssessment = 
-        `No significant structural, statistical, or neural steganalysis anomalies detected. Container markers ` +
-        `terminate cleanly, bit distributions match natural optical noise, and ML probability remains low ` +
-        `(${(mlResult.probability * 100).toFixed(1)}%). The carrier image shows characteristics consistent with an unmodified file.`;
+  const threshold = mlResult.threshold || 0.22;
+  const isMlElevated = mlResult.status === "ready" && mlResult.probability !== null && mlResult.probability >= threshold;
+  const probPct = mlResult.probability !== null ? (mlResult.probability * 100).toFixed(1) : "0.0";
+  const threshPct = (threshold * 100).toFixed(1);
+
+  if (hasConfirmedTrailingPayload) {
+    overallAssessment =
+      "Strong evidence: Valid payload signature identified in trailing container bytes beyond legitimate container termination. Appended archive or binary data confirmed in trailing segment.";
+  } else if (suspiciousFindings.length > 0 || isMlElevated || hasStreamSignatures) {
+    // Statistically or structurally notable, but NO confirmed trailing payload
+    const signals: string[] = [];
+    if (findingSummaries.length > 0) {
+      signals.push(findingSummaries.join(", "));
+    }
+    if (hasStreamSignatures) {
+      signals.push("low-confidence byte sequence pattern(s) in image stream");
+    }
+    if (isMlElevated) {
+      signals.push(`elevated ML steganalysis signal (${probPct}%, threshold: ${threshPct}%)`);
+    } else if (mlResult.status === "ready" && mlResult.probability !== null) {
+      signals.push(`ML signal (${probPct}%) within baseline (< ${threshPct}%)`);
+    }
+
+    overallAssessment =
+      "Multiple statistical indicators warrant further inspection, but the current evidence does not establish that hidden payload data is present.";
+    if (signals.length > 0) {
+      overallAssessment += ` Observed characteristics: ${signals.join("; ")}.`;
     }
   } else {
-    // ML offline or failed: strictly deterministic evaluation
-    if (suspiciousFindings.length > 0) {
-      overallAssessment = 
-        `Evaluation based entirely on deterministic forensic analysis (ML engine offline). Anomalies identified: ` +
-        `${findingSummaries.join(", ")}. Suspicion level: ${level}.`;
-    } else {
-      overallAssessment = 
-        `Evaluation based entirely on deterministic forensic analysis (ML engine offline). Container integrity and ` +
-        `pixel statistics are consistent with a normal, unaltered image.`;
-    }
+    overallAssessment =
+      `No significant structural, statistical, or neural steganalysis anomalies detected. Container markers ` +
+      `terminate cleanly, bit distributions match natural optical noise, and ML probability remains low ` +
+      `(${probPct}%). The carrier image shows characteristics consistent with an unmodified file.`;
   }
 
   return {

@@ -3,6 +3,8 @@ import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { ForensicBackground } from "@/components/forensic-background";
+import { PixelMatrixVisual } from "@/components/pixel-matrix-visual";
 import {
   Binary,
   ArrowRight,
@@ -199,8 +201,9 @@ export default function LandingPage() {
   return (
     <div className="flex flex-col min-h-screen">
       {/* SECTION 1 — HERO & LIVE CONSOLE PREVIEW */}
-      <section className="relative pt-10 pb-16 md:pt-16 md:pb-22 border-b border-border bg-gradient-to-b from-background via-background to-muted/20">
-        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8">
+      <section className="relative pt-10 pb-16 md:pt-16 md:pb-22 border-b border-border bg-gradient-to-b from-background via-background to-muted/20 overflow-hidden">
+        <ForensicBackground mode="idle" density="sparse" />
+        <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
             
             {/* Left Column: Positioning & Action */}
@@ -279,7 +282,10 @@ export default function LandingPage() {
             </div>
 
             {/* Right Column: Hero Visual — Forensic Scanning Visualizer */}
-            <div className="lg:col-span-5">
+            <div className="lg:col-span-5 space-y-4">
+              {/* Abstract Pixel Inspection Matrix */}
+              <PixelMatrixVisual />
+
               <div className="relative rounded-2xl bg-card border border-border p-5 shadow-xl overflow-hidden interactive-card">
                 {/* Window header */}
                 <div className="flex items-center justify-between pb-3.5 border-b border-border text-xs font-mono text-muted-foreground">

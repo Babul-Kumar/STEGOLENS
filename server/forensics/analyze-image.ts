@@ -136,22 +136,36 @@ export async function analyzeImage(
   // Evaluate payload signatures: distinguish trailing payload from incidental stream signature
   if (payloadDetection.detected && payloadDetection.findings.length > 0) {
     for (const f of payloadDetection.findings) {
+      const count = f.count || 1;
+      const offsets = f.offsets || [f.offset];
+      const offsetsStr = offsets.slice(0, 4).map(o => `0x${o.toString(16).toUpperCase()}`).join(", ") +
+        (offsets.length > 4 ? ` (+${offsets.length - 4} more)` : "");
+
       if (f.location === "SIGNATURE_IN_TRAILING_DATA") {
         suspicionScore += FORENSIC_WEIGHTS.PAYLOAD_SIGNATURE_FOUND; // 40 pts
         findings.push({
           category: "payload",
           status: "suspicious",
-          title: "Recognizable Payload Signature in Trailing Data",
-          message: `Embedded ${f.type} signature identified in unexpected container trailing data at offset 0x${f.offset.toString(16).toUpperCase()}.`,
+          severity: "high",
+          confidence: "high",
+          count,
+          offsets,
+          title: `Recognizable ${f.type} Signature in Trailing Data`,
+          message: `Embedded ${f.type} archive/binary signature identified in unexpected container trailing data (${count} occurrence(s) at offset(s) ${offsetsStr}). High confidence of appended payload.`,
           evidence: f.description,
         });
       } else {
-        suspicionScore += 10; // incidental signature in image stream
+        // Incidental match in image stream: Low severity, Low confidence
+        suspicionScore += 5;
         findings.push({
           category: "payload",
           status: "normal",
-          title: "Byte Sequence Pattern in Image Stream",
-          message: `Byte pattern matching ${f.type} observed at offset 0x${f.offset.toString(16).toUpperCase()} inside image stream (consistent with possible incidental compression entropy).`,
+          severity: "low",
+          confidence: "low",
+          count,
+          offsets,
+          title: `Potential ${f.type} Signature Pattern in Image Stream`,
+          message: `Potential ${f.type} byte sequence observed inside legitimate image stream (${count} occurrence(s) at offset(s) ${offsetsStr}). Low confidence match consistent with incidental binary entropy; does not establish hidden payload.`,
           evidence: f.description,
         });
       }
@@ -164,6 +178,8 @@ export async function analyzeImage(
     findings.push({
       category: "structure",
       status: "suspicious",
+      severity: "high",
+      confidence: "high",
       title: "Unexpected Container Trailing Bytes",
       message: `File contains ${fileStructure.trailingBytesCount} unexpected trailing byte(s) after legitimate end of container.`,
       evidence: fileStructure.trailingBytesPreview ? `Preview: ${fileStructure.trailingBytesPreview}` : undefined,
@@ -179,6 +195,8 @@ export async function analyzeImage(
         findings.push({
           category: "structure",
           status: "suspicious",
+          severity: "medium",
+          confidence: "medium",
           title: "Container Structural Anomaly",
           message: anomaly,
           evidence: `Container: ${detectedFormat}`,
@@ -209,6 +227,8 @@ export async function analyzeImage(
     findings.push({
       category: "lsb",
       status: "suspicious",
+      severity: "medium",
+      confidence: "medium",
       title: "LSB Statistical Anomaly (PoV Chi-Square)",
       message: "Pairs-of-Values chi-square test indicates statistical irregularities in bit distributions.",
       evidence: `Red p-val: ${pyResults.lsb.red.chiSquarePValue}, Green: ${pyResults.lsb.green.chiSquarePValue}, Blue: ${pyResults.lsb.blue.chiSquarePValue}`,
@@ -220,6 +240,8 @@ export async function analyzeImage(
     findings.push({
       category: "lsb",
       status: "suspicious",
+      severity: "medium",
+      confidence: "medium",
       title: "LSB Bit-Ratio Imbalance",
       message: "Channel least-significant bit ratios deviate from natural image distributions.",
       evidence: `R: ${(pyResults.lsb.red.onesRatio * 100).toFixed(1)}%, G: ${(pyResults.lsb.green.onesRatio * 100).toFixed(1)}%, B: ${(pyResults.lsb.blue.onesRatio * 100).toFixed(1)}%`,
@@ -231,6 +253,8 @@ export async function analyzeImage(
     findings.push({
       category: "lsb",
       status: "suspicious",
+      severity: "medium",
+      confidence: "medium",
       title: "Sequential Printable Characters in LSB Stream",
       message: "High density of printable ASCII characters detected in extracted LSB stream.",
       evidence: pyResults.lsb.overall.decodedPreview ? `Preview: ${pyResults.lsb.overall.decodedPreview.slice(0, 40)}` : undefined,
@@ -246,6 +270,8 @@ export async function analyzeImage(
       findings.push({
         category: "metadata",
         status: "suspicious",
+        severity: "high",
+        confidence: "high",
         title: "Steganography Tool Signature in Metadata",
         message: `Metadata contains signature characteristic of steganography software: '${kw}'.`,
         evidence: `Keyword match: ${kw}`,
@@ -259,12 +285,16 @@ export async function analyzeImage(
     findings.push({
       category: "structure",
       status: "normal",
+      severity: "info",
+      confidence: "info",
       title: "Container Integrity Verified",
       message: "No trailing bytes or container structural deviations detected.",
     });
     findings.push({
       category: "lsb",
       status: "normal",
+      severity: "info",
+      confidence: "info",
       title: "LSB Channel Distributions Normal",
       message: "Bit ratios and chi-square distributions are consistent with natural image characteristics.",
     });

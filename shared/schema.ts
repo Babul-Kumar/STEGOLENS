@@ -151,8 +151,11 @@ export interface FileStructureAnalysis {
 export interface PayloadDetectionFinding {
   type: string; // ZIP, PDF, GZIP, RAR, 7Z, EXE, etc.
   offset: number;
+  offsets?: number[];
+  count?: number;
   description: string;
   severity: 'low' | 'medium' | 'high';
+  confidence?: 'low' | 'medium' | 'high';
   location?: 'SIGNATURE_IN_TRAILING_DATA' | 'SIGNATURE_IN_IMAGE_STREAM';
 }
 
@@ -175,6 +178,10 @@ export interface AnalysisFindingItem {
   title: string;
   message: string;
   evidence?: string;
+  severity?: 'low' | 'medium' | 'high' | 'info';
+  confidence?: 'low' | 'medium' | 'high' | 'info';
+  count?: number;
+  offsets?: number[];
 }
 
 export interface MLInferenceResult {

@@ -8,6 +8,9 @@ import { execSync } from "child_process";
 import { registerRoutes } from "../routes";
 import { securityHeadersMiddleware, corsMiddleware } from "../security";
 import { SUSPICION_LEVELS, ML_STATUS, calculateSuspicionLevel } from "../../shared/constants";
+import { detectPayloadSignatures } from "../forensics/payload-signatures";
+import { aggregateEvidence } from "../forensics/evidence-aggregator";
+import type { AnalysisFindingItem, MLInferenceResult } from "@shared/schema";
 
 // Helper to generate genuine images using Python Pillow
 function generateTestImage(format: string, width = 64, height = 64, isGray = false, exifMeta?: Record<string, string>): Buffer {
@@ -322,6 +325,139 @@ async function runForensicsTests() {
     assert(
       resDel.status === 200 && jsonDel.success && resGetAfterDel.status === 404,
       "Test 9g: DELETE /api/analyses/:id removes analysis from SQLite database"
+    );
+
+    // -------------------------------------------------------------
+    // Part 4: Forensic Precision, Grouping, & Objective Assessment
+    // -------------------------------------------------------------
+    console.log("\n--- Part 4: Forensic Precision, Grouping & Objective Assessment ---");
+
+    // 1. Three identical MZ signatures inside image stream -> 1 grouped finding, count=3, LOW confidence
+    const streamBuf = Buffer.alloc(500, 0xAA);
+    streamBuf[100] = 0x4D; streamBuf[101] = 0x5A; // MZ 1
+    streamBuf[200] = 0x4D; streamBuf[201] = 0x5A; // MZ 2
+    streamBuf[300] = 0x4D; streamBuf[301] = 0x5A; // MZ 3
+    const resStreamMz = detectPayloadSignatures(streamBuf, undefined);
+    const mzStreamFindings = resStreamMz.findings.filter((f) => f.type === "EXECUTABLE_MZ");
+    assert(
+      mzStreamFindings.length === 1,
+      "Test 11a: Three identical MZ signatures in image stream grouped into exactly 1 finding"
+    );
+    assert(
+      mzStreamFindings[0]?.count === 3,
+      "Test 11b: Grouped MZ finding has occurrence count = 3",
+      `Count: ${mzStreamFindings[0]?.count}`
+    );
+    assert(
+      mzStreamFindings[0]?.confidence === "low",
+      "Test 11c: Grouped MZ finding in image stream is assigned LOW confidence",
+      `Confidence: ${mzStreamFindings[0]?.confidence}`
+    );
+    assert(
+      mzStreamFindings[0]?.location === "SIGNATURE_IN_IMAGE_STREAM",
+      "Test 11d: Location correctly identified as SIGNATURE_IN_IMAGE_STREAM"
+    );
+
+    // 2. ZIP signature after JPEG EOI -> trailing payload finding, HIGH confidence
+    const trailingZipBuf = Buffer.alloc(300, 0x00);
+    // Boundary at offset 200, ZIP header at offset 200
+    trailingZipBuf[200] = 0x50; trailingZipBuf[201] = 0x4B; trailingZipBuf[202] = 0x03; trailingZipBuf[203] = 0x04;
+    const resTrailingZip = detectPayloadSignatures(trailingZipBuf, 200);
+    const zipTrailingFindings = resTrailingZip.findings.filter((f) => f.type === "ZIP");
+    assert(
+      zipTrailingFindings.length === 1 && zipTrailingFindings[0].location === "SIGNATURE_IN_TRAILING_DATA",
+      "Test 12a: ZIP signature after JPEG EOI boundary classified as trailing payload finding"
+    );
+    assert(
+      zipTrailingFindings[0]?.confidence === "high",
+      "Test 12b: Trailing ZIP payload finding assigned HIGH confidence",
+      `Confidence: ${zipTrailingFindings[0]?.confidence}`
+    );
+    assert(
+      zipTrailingFindings[0]?.severity === "high",
+      "Test 12c: Trailing ZIP payload finding assigned HIGH severity"
+    );
+
+    // 3. Single random MZ byte sequence -> not confirmed executable
+    const singleMzBuf = Buffer.alloc(100, 0x00);
+    singleMzBuf[50] = 0x4D; singleMzBuf[51] = 0x5A; // MZ
+    const resSingleMz = detectPayloadSignatures(singleMzBuf, undefined);
+    const singleMzFinding = resSingleMz.findings[0];
+    assert(
+      singleMzFinding !== undefined &&
+      !singleMzFinding.description.toLowerCase().includes("confirmed executable") &&
+      !singleMzFinding.description.toLowerCase().includes("malware detected") &&
+      singleMzFinding.confidence === "low",
+      "Test 13: Single random MZ byte sequence in stream is not claimed as confirmed executable"
+    );
+
+    // 4. ML probability 42.3% -> wording must not claim confirmed manipulation
+    const mlTest42: MLInferenceResult = {
+      status: "ready",
+      prediction: "cover",
+      probability: 0.423,
+      confidence: "medium",
+      modelVersion: "ALASKA2 EfficientNet-B0 (v1.0)",
+      threshold: 0.5,
+      description: "ML analysis produced a 42.3% steganalysis probability, which is below the configured decision threshold (50.0%).",
+    };
+    const agg42 = aggregateEvidence(20, [], mlTest42);
+    const desc42 = (mlTest42.description || "").toLowerCase();
+    const assess42 = agg42.overallAssessment.toLowerCase();
+    assert(
+      !desc42.includes("detected statistical manipulation") &&
+      !desc42.includes("confirmed manipulation") &&
+      !assess42.includes("manipulation confirmed") &&
+      !assess42.includes("steganography confirmed") &&
+      (desc42.includes("42.3%") || desc42.includes("below the configured decision threshold")),
+      "Test 14: ML probability 42.3% wording is conservative and does not claim confirmed manipulation"
+    );
+
+    // 5. Overall score 47 -> MODERATE
+    const level47 = calculateSuspicionLevel(47);
+    assert(
+      level47 === SUSPICION_LEVELS.MODERATE,
+      "Test 15: Overall suspicion score 47 is classified as MODERATE",
+      `Level: ${level47}`
+    );
+
+    // 6. No trailing payload -> assessment must not claim payload detected
+    const findingsNoTrailing: AnalysisFindingItem[] = [
+      {
+        category: "lsb",
+        status: "suspicious",
+        severity: "medium",
+        confidence: "medium",
+        title: "LSB Statistical Anomaly (PoV Chi-Square)",
+        message: "Pairs-of-Values chi-square test indicates statistical irregularities in bit distributions.",
+      },
+      {
+        category: "payload",
+        status: "normal",
+        severity: "low",
+        confidence: "low",
+        count: 3,
+        offsets: [100, 200, 300],
+        title: "Potential EXECUTABLE_MZ Signature Pattern in Image Stream",
+        message: "Potential EXECUTABLE_MZ byte sequence observed inside legitimate image stream (3 occurrence(s)).",
+      },
+    ];
+    const aggNoTrailing = aggregateEvidence(47, findingsNoTrailing, {
+      status: "ready",
+      prediction: "cover",
+      probability: 0.423,
+      confidence: "medium",
+      modelVersion: "ALASKA2 EfficientNet-B0 (v1.0)",
+      threshold: 0.5,
+    });
+    const assessTextNoTrailing = aggNoTrailing.overallAssessment.toLowerCase();
+    assert(
+      !assessTextNoTrailing.includes("hidden data confirmed") &&
+      !assessTextNoTrailing.includes("executable confirmed") &&
+      !assessTextNoTrailing.includes("malware detected") &&
+      !assessTextNoTrailing.includes("steganography confirmed") &&
+      assessTextNoTrailing.includes("does not establish that hidden payload data is present"),
+      "Test 16: No trailing payload assessment explicitly states evidence does not establish hidden payload data"
     );
 
     // -------------------------------------------------------------

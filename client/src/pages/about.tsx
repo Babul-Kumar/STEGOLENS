@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { ForensicBackground } from "@/components/forensic-background";
 import {
   Binary,
   ArrowRight,
@@ -63,8 +64,9 @@ export default function AboutPage() {
   ];
 
   return (
-    <div className="min-h-screen py-10 bg-background transition-colors">
-      <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 space-y-10">
+    <div className="min-h-screen py-10 bg-background relative transition-colors">
+      <ForensicBackground mode="idle" density="sparse" />
+      <div className="max-w-[1200px] mx-auto px-4 sm:px-6 lg:px-8 space-y-10 relative z-10">
         
         {/* Header */}
         <div className="space-y-3 pb-6 border-b border-border">
