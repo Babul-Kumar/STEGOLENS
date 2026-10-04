@@ -1,14 +1,21 @@
+import fs from "fs";
+import path from "path";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
-import path from "path";
+
+const isProductionBundle = fs.existsSync(path.resolve(import.meta.dirname, "public"));
+process.env.NODE_ENV = process.env.NODE_ENV || (isProductionBundle ? "production" : "development");
 
 const app = express();
+
+// Apply security headers and CORS
+import { securityHeadersMiddleware, corsMiddleware } from "./security";
+app.use(securityHeadersMiddleware);
+app.use(corsMiddleware);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
-
-// Serve uploads folder statically
-app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')));
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -47,9 +54,14 @@ app.use((req, res, next) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
 
-    res.status(status).json({ message });
+    // Standardized error response format without internal stack traces
+    res.status(status).json({
+      error: {
+        code: err.code || "INTERNAL_ERROR",
+        message: status === 500 ? "An unexpected server error occurred." : message,
+      },
+    });
     console.error('Express error:', err);
-    // Removed throw err to prevent server crash
   });
 
   // importantly only setup vite in development and after
@@ -61,12 +73,9 @@ app.use((req, res, next) => {
     serveStatic(app);
   }
 
-  // ALWAYS serve the app on port 5000
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = 3000;
+  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 5000;
   server.listen(port, () => {
-    log(`serving on port ${port}`);
+    log(`StegoLens serving on port ${port}`);
   });
 })();
 

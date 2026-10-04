@@ -1,0 +1,19 @@
+{
+  "seed": 42,
+  "lr": 0.0002,
+  "weight_decay": 0.0001,
+  "batch": 16,
+  "epochs_run": 12,
+  "optimizer": "AdamW",
+  "scheduler": "CosineAnnealing (per step)",
+  "loss": "BCEWithLogitsLoss",
+  "augmentations": "hflip, vflip, rot90",
+  "n_train_ids": 12000,
+  "n_val_ids": 1500,
+  "n_test_ids": 1500,
+  "algos": [
+    "JMiPOD",
+    "JUNIWARD",
+    "UERD"
+  ]
+}

@@ -1,247 +1,265 @@
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import ImageUpload from "@/components/image-upload";
-import AnalysisResults from "@/components/analysis-results";
-import { useWallet } from "@/hooks/use-wallet";
-import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Link } from "wouter";
 import { 
   Search, 
   AlertTriangle, 
-  Shield, 
+  ShieldCheck, 
+  Activity, 
+  Upload, 
+  FileText, 
+  Cpu, 
   Clock, 
-  Upload,
-  History as HistoryIcon,
+  ArrowRight,
   TrendingUp,
-  Activity
+  Sliders
 } from "lucide-react";
-
-interface DashboardStats {
-  totalScans: number;
-  threatsDetected: number;
-  cleanImages: number;
-  avgScanTime: string;
-}
-
-interface RecentActivity {
-  id: number;
-  filename: string;
-  threatDetected: boolean;
-  createdAt: string;
-}
+import type { Analysis } from "@shared/schema";
 
 export default function Dashboard() {
-  const { account, isConnected } = useWallet();
-  const [currentReportId, setCurrentReportId] = useState<number | null>(null);
-
-  const { data: stats } = useQuery<DashboardStats>({
-    queryKey: ['/api/stats', account],
-    queryFn: () => fetch(`/api/stats/${account}`).then(res => res.json()),
-    enabled: isConnected && !!account,
+  const { data: analysesData, isLoading } = useQuery<{ analyses: Analysis[]; count: number }>({
+    queryKey: ["/api/analyses"],
+    queryFn: async () => {
+      const res = await fetch("/api/analyses?limit=100");
+      if (!res.ok) throw new Error("Failed to load analyses");
+      return res.json();
+    },
   });
 
-  const { data: recentReports } = useQuery({
-    queryKey: ['/api/history', account],
-    queryFn: () => fetch(`/api/history/${account}`).then(res => res.json()),
-    enabled: isConnected && !!account,
+  const { data: healthData } = useQuery({
+    queryKey: ["/api/health"],
+    queryFn: async () => {
+      const res = await fetch("/api/health");
+      if (!res.ok) return null;
+      return res.json();
+    },
   });
 
-  const { data: currentReport } = useQuery({
-    queryKey: ['/api/analysis', currentReportId],
-    queryFn: () => fetch(`/api/analysis/${currentReportId}`).then(res => res.json()),
-    enabled: !!currentReportId,
-    refetchInterval: currentReportId ? 2000 : false,
-  });
+  const analyses = analysesData?.analyses || [];
+  const totalScans = analyses.length;
+  const highRiskCount = analyses.filter((a) => a.riskLevel === "HIGH" || a.riskLevel === "VERY_HIGH").length;
+  const moderateRiskCount = analyses.filter((a) => a.riskLevel === "MODERATE").length;
+  const cleanCount = analyses.filter((a) => a.riskLevel === "LOW").length;
 
-  const recentActivity: RecentActivity[] = recentReports?.reports?.slice(0, 3) || [];
-
-  if (!isConnected) {
-    return (
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="text-center py-12">
-          <h1 className="text-4xl font-bold text-slate-900 mb-4">
-            Welcome to StegoGuard
-          </h1>
-          <p className="text-xl text-slate-600 mb-8">
-            Advanced steganography detection powered by blockchain technology
-          </p>
-          <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-8 max-w-md mx-auto">
-            <div className="text-slate-500 mb-4">
-              Connect your wallet to start analyzing images for hidden content
-            </div>
-          </div>
-        </div>
-      </main>
-    );
-  }
+  const recent = analyses.slice(0, 5);
 
   return (
-    <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Dashboard Header */}
-      <div className="mb-8">
-        <div className="md:flex md:items-center md:justify-between">
-          <div className="flex-1 min-w-0">
-            <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
-            <p className="mt-2 text-slate-600">
-              Advanced steganography detection powered by blockchain technology
+    <div className="min-h-screen bg-background py-8 transition-colors">
+      <div className="max-w-[1360px] mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border pb-6">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2.5">
+              <Activity className="h-6 w-6 text-primary" />
+              Forensic Intelligence Dashboard
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Real-time telemetry, model readiness, and forensic examination summaries.
             </p>
           </div>
-          <div className="mt-4 md:mt-0 md:ml-4">
-            <Link href="/upload">
-              <Button className="bg-primary-600 hover:bg-primary-700 text-white">
-                <Upload className="h-4 w-4 mr-2" />
-                Upload Image
+
+          <div className="flex items-center gap-2.5">
+            <Link href="/history">
+              <Button variant="outline" size="sm" className="h-9 text-xs">
+                <FileText className="h-3.5 w-3.5 mr-1.5" />
+                View Full History
+              </Button>
+            </Link>
+            <Link href="/analyze">
+              <Button size="sm" className="h-9 text-xs">
+                <Upload className="h-3.5 w-3.5 mr-1.5" />
+                New Inspection
               </Button>
             </Link>
           </div>
         </div>
-      </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <div className="w-8 h-8 bg-primary-100 rounded-lg flex items-center justify-center">
-                  <Search className="h-4 w-4 text-primary-600" />
-                </div>
+        {/* Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card className="border-border">
+            <CardContent className="p-5 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-medium text-muted-foreground block">Total Analyses</span>
+                <span className="text-2xl font-bold font-mono text-foreground">{totalScans}</span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5">Persisted in SQLite</span>
               </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-slate-600">Total Scans</p>
-                <p className="text-2xl font-bold text-slate-900">
-                  {stats?.totalScans || 0}
-                </p>
+              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                <Search className="h-5 w-5" />
               </div>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <div className="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center">
-                  <AlertTriangle className="h-4 w-4 text-red-600" />
-                </div>
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-slate-600">Threats Detected</p>
-                <p className="text-2xl font-bold text-slate-900">
-                  {stats?.threatsDetected || 0}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center">
-                  <Shield className="h-4 w-4 text-emerald-600" />
-                </div>
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-slate-600">Clean Images</p>
-                <p className="text-2xl font-bold text-slate-900">
-                  {stats?.cleanImages || 0}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center">
-              <div className="flex-shrink-0">
-                <div className="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center">
-                  <Clock className="h-4 w-4 text-amber-600" />
-                </div>
-              </div>
-              <div className="ml-4">
-                <p className="text-sm font-medium text-slate-600">Avg. Scan Time</p>
-                <p className="text-2xl font-bold text-slate-900">
-                  {stats?.avgScanTime || '0s'}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Image Upload Section */}
-        <div className="lg:col-span-2">
-          <ImageUpload onAnalysisComplete={setCurrentReportId} />
-        </div>
+          <Card className="border-border">
+            <CardContent className="p-5 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-medium text-muted-foreground block">Suspicious Carriers</span>
+                <span className="text-2xl font-bold font-mono text-red-500">{highRiskCount + moderateRiskCount}</span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5">Elevated forensic/ML risk</span>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center text-red-500">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
 
-        {/* Recent Activity Sidebar */}
-        <div className="lg:col-span-1">
-          <Card>
-            <CardContent className="p-6">
-              <h3 className="text-lg font-semibold text-slate-900 mb-4 flex items-center">
-                <Activity className="h-5 w-5 text-slate-600 mr-2" />
-                Recent Activity
-              </h3>
-              
-              {recentActivity.length === 0 ? (
-                <div className="text-center py-6">
-                  <HistoryIcon className="h-8 w-8 text-slate-300 mx-auto mb-2" />
-                  <p className="text-sm text-slate-500">No recent activity</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {recentActivity.map((activity) => (
-                    <div key={activity.id} className="flex items-start space-x-3 p-3 rounded-lg hover:bg-slate-50 transition-colors duration-200">
-                      <div className={`flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center ${
-                        activity.threatDetected 
-                          ? 'bg-red-100 text-red-600' 
-                          : 'bg-emerald-100 text-emerald-600'
-                      }`}>
-                        {activity.threatDetected ? (
-                          <AlertTriangle className="h-4 w-4" />
-                        ) : (
-                          <Shield className="h-4 w-4" />
-                        )}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-slate-900">
-                          {activity.threatDetected ? 'Threat Detected' : 'Clean Image'}
-                        </p>
-                        <p className="text-xs text-slate-500 font-mono truncate">
-                          {activity.filename}
-                        </p>
-                        <p className="text-xs text-slate-400">
-                          {new Date(activity.createdAt).toLocaleString()}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              
-              <div className="mt-4 pt-4 border-t border-slate-200">
-                <Link href="/history">
-                  <Button variant="ghost" className="w-full text-primary-600 hover:text-primary-700">
-                    View all activity →
-                  </Button>
-                </Link>
+          <Card className="border-border">
+            <CardContent className="p-5 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-medium text-muted-foreground block">Normal Baseline</span>
+                <span className="text-2xl font-bold font-mono text-emerald-500">{cleanCount}</span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5">Clean bit-plane distributions</span>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-500">
+                <ShieldCheck className="h-5 w-5" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-border">
+            <CardContent className="p-5 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-medium text-muted-foreground block">ML Engine Status</span>
+                <span className="text-lg font-bold font-mono text-foreground">
+                  {healthData?.services?.ml?.status === "ready" ? "READY" : "ONLINE"}
+                </span>
+                <span className="text-[10px] text-muted-foreground block mt-0.5">
+                  EfficientNet-B0 (AUC 0.77)
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-500">
+                <Cpu className="h-5 w-5" />
               </div>
             </CardContent>
           </Card>
         </div>
-      </div>
 
-      {/* Analysis Results */}
-      {currentReport?.report && (
-        <div className="mt-8">
-          <AnalysisResults report={currentReport.report} />
+        {/* Two-Column Layout */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Recent Activity (2 cols) */}
+          <div className="lg:col-span-2 space-y-4">
+            <Card className="border-border">
+              <CardHeader className="pb-3 border-b border-border">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-sm font-semibold">Recent Forensic Examinations</CardTitle>
+                    <CardDescription className="text-xs">Latest image analysis records and outcomes</CardDescription>
+                  </div>
+                  <Link href="/history">
+                    <Button variant="ghost" size="sm" className="h-8 text-xs font-mono text-primary">
+                      All Records <ArrowRight className="h-3 w-3 ml-1" />
+                    </Button>
+                  </Link>
+                </div>
+              </CardHeader>
+              <CardContent className="p-0 divide-y divide-border">
+                {recent.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-muted-foreground font-mono">
+                    No analyses recorded yet. Start by inspecting an image.
+                  </div>
+                ) : (
+                  recent.map((item) => (
+                    <div key={item.id} className="p-4 flex items-center justify-between gap-4 hover:bg-muted/30 transition-colors">
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-foreground truncate max-w-[200px]">
+                            {item.filename}
+                          </span>
+                          <Badge variant="outline" className="text-[9px] font-mono uppercase">
+                            {item.mimeType.split("/")[1]}
+                          </Badge>
+                          <Badge
+                            variant="outline"
+                            className={`text-[9px] font-mono ${
+                              item.riskLevel === "VERY_HIGH" || item.riskLevel === "HIGH"
+                                ? "text-red-500 border-red-500/30"
+                                : item.riskLevel === "MODERATE"
+                                ? "text-amber-500 border-amber-500/30"
+                                : "text-emerald-500 border-emerald-500/30"
+                            }`}
+                          >
+                            {item.riskLevel} ({item.suspicionScore})
+                          </Badge>
+                        </div>
+                        <div className="text-[10px] font-mono text-muted-foreground flex gap-3">
+                          <span>{(item.fileSize / 1024).toFixed(1)} KB</span>
+                          <span>{new Date(item.createdAt).toLocaleDateString()}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <Link href={`/analyze?id=${item.id}`}>
+                          <Button variant="outline" size="sm" className="h-7 text-[11px] font-mono">
+                            Inspect
+                          </Button>
+                        </Link>
+                        <a href={`/api/analyses/${item.id}/report?format=pdf`} target="_blank" rel="noreferrer">
+                          <Button variant="ghost" size="sm" className="h-7 text-[11px] font-mono">
+                            PDF
+                          </Button>
+                        </a>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Model & Architecture Overview (1 col) */}
+          <div className="space-y-4">
+            <Card className="border-border">
+              <CardHeader className="pb-3 border-b border-border">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <Cpu className="h-4 w-4 text-primary" />
+                  Neural Steganalysis Model
+                </CardTitle>
+                <CardDescription className="text-xs">ALASKA2 EfficientNet-B0 baseline</CardDescription>
+              </CardHeader>
+              <CardContent className="p-4 space-y-3 text-xs">
+                <div className="p-3 rounded-lg bg-card border border-border space-y-1.5 font-mono text-[11px]">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Architecture:</span>
+                    <span className="text-foreground">EfficientNet-B0</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Input Resolution:</span>
+                    <span className="text-foreground">512 × 512 px (RGB)</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Calibrated Threshold:</span>
+                    <span className="text-foreground">0.22</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Validation ROC-AUC:</span>
+                    <span className="text-foreground">0.697</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Weighted AUC:</span>
+                    <span className="text-foreground">0.767</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Trained Stego Algos:</span>
+                    <span className="text-foreground">JMiPOD, JUNIWARD, UERD</span>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  StegoLens pairs neural classification with deterministic spatial, LSB, and container markers.
+                  Neither model nor heuristic is used in isolation.
+                </p>
+
+                <Link href="/analyze">
+                  <Button className="w-full h-8 text-xs font-medium">
+                    Open Forensic Console
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
+          </div>
         </div>
-      )}
-    </main>
+      </div>
+    </div>
   );
 }

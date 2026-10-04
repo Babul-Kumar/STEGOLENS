@@ -1,0 +1,10 @@
+{
+  "model": "efficientnet_b0",
+  "input_size": 512,
+  "channels": 3,
+  "classes": 1,
+  "output": "single logit -> sigmoid -> P(stego)",
+  "task": "binary_steganalysis",
+  "stego_adjust": false,
+  "threshold": 0.21999999999999997
+}

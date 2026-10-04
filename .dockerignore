@@ -1,0 +1,15 @@
+node_modules
+dist
+.git
+.github
+.env
+*.log
+*.tmp
+__pycache__
+*.pyc
+uploads/*
+!uploads/.gitkeep
+data/*.db
+data/*.db-journal
+.DS_Store
+Thumbs.db

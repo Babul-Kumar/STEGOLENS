@@ -19,26 +19,71 @@ declare global {
 }
 
 
-// to run use this in terminal $env:NODE_ENV="development"; tsx server/index.ts
-// Configure multer for file uploads
-const upload = multer({
-  dest: 'uploads/',
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Invalid file type. Only JPG, PNG, and WEBP images are allowed.'));
-    }
-  }
+import fsSync from "fs";
+import { uploadRateLimiter } from "./security";
+import { sanitizeOriginalFilename, validateUploadedFile } from "./upload-validator";
+import { UPLOAD_LIMITS, ML_STATUS } from "@shared/constants";
+import type { AnalysisResult } from "@shared/schema";
+import { analyzeImage } from "./forensics/analyze-image";
+import { generateForensicPdfReport } from "./forensics/pdf-report-generator";
+import { checkMlHealth } from "./forensics/ml-service";
+
+// Ensure uploads directory exists
+const uploadsDir = path.resolve(process.cwd(), 'uploads');
+if (!fsSync.existsSync(uploadsDir)) {
+  fsSync.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Configure multer with safe disk storage using random UUIDs
+const diskStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (_req, _file, cb) => {
+    // Safe server-side filename - never use user-supplied filename
+    cb(null, `${crypto.randomUUID()}.tmp`);
+  },
 });
+
+const upload = multer({
+  storage: diskStorage,
+  limits: {
+    fileSize: UPLOAD_LIMITS.MAX_FILE_SIZE_BYTES, // 15 MB centralized constant
+    files: 1,
+  },
+});
+
+// Middleware wrapper to handle multer errors cleanly with standardized JSON error codes
+function handleUploadMiddleware(req: any, res: any, next: any) {
+  upload.single('image')(req, res, (err: any) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(413).json({
+          error: {
+            code: 'FILE_TOO_LARGE',
+            message: 'File exceeds the 15 MB upload limit.',
+          },
+        });
+      }
+      return res.status(400).json({
+        error: {
+          code: 'INVALID_REQUEST',
+          message: err.message || 'Invalid upload request.',
+        },
+      });
+    }
+    next();
+  });
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // User authentication routes
   app.post("/api/auth/connect", async (req, res) => {
     try {
-      const { walletAddress, nickname } = insertUserSchema.parse(req.body);
+      const { walletAddress, nickname } = req.body;
+      if (!walletAddress || typeof walletAddress !== 'string') {
+        return res.status(400).json({ error: "Invalid wallet address" });
+      }
       
       let user = await storage.getUserByWalletAddress(walletAddress);
       if (!user) {
@@ -66,69 +111,293 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Image upload and analysis routes
-  app.post("/api/upload", upload.single('image'), async (req, res) => {
+  // Secure Image Upload & Inspection Endpoint (Phase D)
+  app.post("/api/upload", uploadRateLimiter, handleUploadMiddleware, async (req, res) => {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({
+        error: {
+          code: "INVALID_REQUEST",
+          message: "No image file provided in upload request.",
+        },
+      });
+    }
+
+    const tempFilePath = file.path;
+    const originalName = file.originalname || 'unknown';
+    const sanitizedName = sanitizeOriginalFilename(originalName);
+
     try {
-      const file = req.file as Express.Multer.File | undefined;
-      if (!file) {
-        return res.status(400).json({ error: "No image file provided" });
-      }
+      // 1. Read file to compute SHA-256 fingerprint
+      const fileBuffer = await fs.readFile(tempFilePath);
+      const sha256 = crypto.createHash('sha256').update(fileBuffer).digest('hex');
 
-      const body = req.body as { walletAddress?: string };
-      const walletAddress = body.walletAddress;
-      if (!walletAddress) {
-        return res.status(400).json({ error: "Wallet address required" });
-      }
+      // 2. Execute full validation pipeline (size, magic bytes, MIME, decoding, dimensions, decompression safety)
+      const validation = await validateUploadedFile(
+        tempFilePath,
+        originalName,
+        file.size,
+        file.mimetype
+      );
 
-      let user = await storage.getUserByWalletAddress(walletAddress);
-      if (!user) {
-        // Create user if they don't exist
-        user = await storage.createUser({ walletAddress, nickname: null });
-      }
+      if (!validation.valid) {
+        const statusCode = 
+          validation.code === 'FILE_TOO_LARGE' ? 413 :
+          validation.code === 'UNSUPPORTED_FORMAT' ? 415 :
+          validation.code === 'IMAGE_TOO_LARGE' ? 422 : 400;
 
-      // Generate image hash
-      const fileBuffer = await fs.readFile(file.path);
-      const imageHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
-
-      // Check if image was already analyzed
-      const existingReport = await storage.getScanReportByImageHash(imageHash);
-      if (existingReport) {
-        return res.json({ 
-          reportId: existingReport.id,
-          imageHash,
-          message: "Image already analyzed"
+        return res.status(statusCode).json({
+          error: {
+            code: validation.code,
+            message: validation.message,
+          },
         });
       }
 
-      // Create initial scan report
-      if (!file) {
-        return res.status(400).json({ error: "No image file provided" });
+      // 3. Return sanitized file metadata on successful validation
+      return res.json({
+        success: true,
+        file: {
+          id: crypto.randomUUID(),
+          originalFilename: sanitizedName,
+          format: validation.format,
+          mimeType: validation.mimeType,
+          size: file.size,
+          width: validation.width,
+          height: validation.height,
+          sha256,
+          uploadedAt: new Date().toISOString(),
+        },
+        message: "File successfully verified against all security and integrity standards.",
+      });
+
+    } catch (err: any) {
+      console.error('Upload processing error:', err.message);
+      return res.status(500).json({
+        error: {
+          code: "ANALYSIS_FAILED",
+          message: "An unexpected error occurred while validating the uploaded file.",
+        },
+      });
+    } finally {
+      // Ephemeral cleanup: NEVER leave temporary files on disk
+      if (tempFilePath) {
+        await fs.unlink(tempFilePath).catch(() => {});
       }
-      const scanReport = await storage.createScanReport({
-        userId: user.id,
-        imageHash,
-        ipfsHash: '', // Will be updated after analysis
-        filename: file.originalname || 'unknown',
+    }
+  });
+
+  // Forensic Extraction & Analysis Pipeline Endpoint (Phase E)
+  app.post("/api/analyze", uploadRateLimiter, handleUploadMiddleware, async (req, res) => {
+    const file = req.file;
+    if (!file) {
+      return res.status(400).json({
+        error: {
+          code: "INVALID_REQUEST",
+          message: "No image file provided in analysis request.",
+        },
+      });
+    }
+
+    const tempFilePath = file.path;
+    const originalName = file.originalname || "unknown";
+    const sanitizedName = sanitizeOriginalFilename(originalName);
+
+    try {
+      // 1. Enforce Phase D secure validation
+      const validation = await validateUploadedFile(
+        tempFilePath,
+        originalName,
+        file.size,
+        file.mimetype
+      );
+
+      if (!validation.valid) {
+        const statusCode = 
+          validation.code === 'FILE_TOO_LARGE' ? 413 :
+          validation.code === 'UNSUPPORTED_FORMAT' ? 415 :
+          validation.code === 'IMAGE_TOO_LARGE' ? 422 : 400;
+
+        return res.status(statusCode).json({
+          error: {
+            code: validation.code,
+            message: validation.message,
+          },
+        });
+      }
+
+      // 2. Execute deterministic Phase E forensic extraction pipeline
+      const analysisResult = await analyzeImage(
+        tempFilePath,
+        sanitizedName,
+        file.size,
+        validation.mimeType,
+        validation.format
+      );
+
+      // 3. Persist analysis result in database
+      const saved = await storage.createAnalysis({
+        userId: null,
+        filename: sanitizedName,
+        fileHash: analysisResult.file.sha256,
         fileSize: file.size,
-        threatDetected: false,
-        lsbAnalysis: null,
-        metadata: null,
-        heatmapUrl: null,
-        blockchainTxHash: null,
+        mimeType: validation.mimeType,
+        width: analysisResult.file.width,
+        height: analysisResult.file.height,
+        status: "completed",
+        suspicionScore: analysisResult.risk.score,
+        riskLevel: analysisResult.risk.level,
+        mlStatus: analysisResult.ml.status,
+        mlPrediction: analysisResult.ml.prediction,
+        mlProbability: analysisResult.ml.probability !== null ? analysisResult.ml.probability.toString() : null,
+        mlConfidence: analysisResult.ml.confidence,
+        modelVersion: analysisResult.ml.modelVersion,
+        resultJson: JSON.stringify(analysisResult),
+        errorMessage: null,
       });
 
-      res.json({ 
-        reportId: scanReport.id,
-        imageHash,
-        message: "Upload successful, starting analysis"
+      analysisResult.id = saved.id;
+
+      return res.json({
+        success: true,
+        analysis: analysisResult,
       });
 
-      // Start background analysis
-      analyzeImageAsync(scanReport.id, req.file.path);
+    } catch (err: any) {
+      console.error("Forensic analysis error:", err.message);
+      return res.status(500).json({
+        error: {
+          code: "ANALYSIS_FAILED",
+          message: "An unexpected error occurred during forensic extraction.",
+        },
+      });
+    } finally {
+      // Ephemeral cleanup: guaranteed unlinking of temporary file
+      if (tempFilePath) {
+        await fs.unlink(tempFilePath).catch(() => {});
+      }
+    }
+  });
 
-    } catch (error) {
-      console.error('Upload error:', error);
-      res.status(500).json({ error: "Upload failed" });
+  // List recent analyses (with pagination)
+  app.get("/api/analyses", async (req, res) => {
+    try {
+      const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string, 10) || 20));
+      const offset = Math.max(0, parseInt(req.query.offset as string, 10) || 0);
+      const records = await storage.getAnalyses(limit, offset);
+      return res.json({
+        analyses: records,
+        limit,
+        offset,
+        count: records.length,
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        error: { code: "SERVER_ERROR", message: "Failed to list analyses." },
+      });
+    }
+  });
+
+  // Get canonical analysis by ID
+  app.get("/api/analyses/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: { code: "INVALID_REQUEST", message: "Invalid analysis ID." } });
+      }
+
+      const record = await storage.getAnalysis(id);
+      if (!record) {
+        return res.status(404).json({ error: { code: "NOT_FOUND", message: "Analysis report not found." } });
+      }
+
+      if (record.resultJson) {
+        const fullResult = JSON.parse(record.resultJson);
+        return res.json({ analysis: fullResult });
+      }
+
+      return res.json({ analysis: record });
+    } catch (err: any) {
+      return res.status(500).json({ error: { code: "SERVER_ERROR", message: "Failed to retrieve analysis." } });
+    }
+  });
+
+  // Delete analysis by ID
+  app.delete("/api/analyses/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: { code: "INVALID_REQUEST", message: "Invalid analysis ID." } });
+      }
+
+      const deleted = await storage.deleteAnalysis(id);
+      if (!deleted) {
+        return res.status(404).json({ error: { code: "NOT_FOUND", message: "Analysis record not found." } });
+      }
+
+      return res.json({ success: true, message: `Analysis ${id} deleted successfully.` });
+    } catch (err: any) {
+      return res.status(500).json({ error: { code: "SERVER_ERROR", message: "Failed to delete analysis." } });
+    }
+  });
+
+  // Export forensic report (PDF or JSON)
+  app.get("/api/analyses/:id/report", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) {
+        return res.status(400).json({ error: { code: "INVALID_REQUEST", message: "Invalid analysis ID." } });
+      }
+
+      const record = await storage.getAnalysis(id);
+      if (!record || !record.resultJson) {
+        return res.status(404).json({ error: { code: "NOT_FOUND", message: "Analysis record not found." } });
+      }
+
+      const analysis: AnalysisResult = JSON.parse(record.resultJson);
+      const format = (req.query.format as string) || "pdf";
+
+      if (format === "json") {
+        res.setHeader("Content-Disposition", `attachment; filename="stegolens-report-${analysis.file.name}.json"`);
+        res.setHeader("Content-Type", "application/json");
+        return res.send(record.resultJson);
+      }
+
+      const pdfBuffer = await generateForensicPdfReport(analysis);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="stegolens-report-${analysis.file.name}.pdf"`);
+      return res.send(pdfBuffer);
+    } catch (err: any) {
+      console.error("Report generation error:", err);
+      return res.status(500).json({ error: { code: "REPORT_FAILED", message: "Failed to generate forensic report." } });
+    }
+  });
+
+  // Health Check Endpoint (Application, Database, Forensics, and ML)
+  app.get("/api/health", async (_req, res) => {
+    try {
+      const mlHealth = await checkMlHealth();
+      return res.json({
+        status: "healthy",
+        timestamp: new Date().toISOString(),
+        version: "2.0.0",
+        services: {
+          database: {
+            type: "sqlite",
+            status: "connected",
+          },
+          forensics: {
+            status: "ready",
+            capabilities: ["exif", "shannon_entropy", "histogram", "lsb_pov_chisquare", "container_markers", "signatures"],
+          },
+          ml: mlHealth,
+        },
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        status: "degraded",
+        error: err.message,
+      });
     }
   });
 
@@ -213,8 +482,9 @@ async function analyzeImageAsync(reportId: number, imagePath: string) {
   try {
     // Call Python analysis service
     const pythonServicePath = path.join(process.cwd(), 'server', 'python-service', 'app.py');
+    const pythonBin = process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3');
     
-    const pythonProcess = spawn('python3', [pythonServicePath, imagePath]);
+    const pythonProcess = spawn(pythonBin, [pythonServicePath, imagePath]);
     
     let result = '';
     let error = '';

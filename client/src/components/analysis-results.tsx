@@ -203,7 +203,7 @@ export default function AnalysisResults({ report, imageUrl, heatmapUrl }: Analys
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => window.open(ipfsService.getIPFSUrl(report.ipfsHash), '_blank')}
+                          onClick={() => report.ipfsHash && window.open(ipfsService.getIPFSUrl(report.ipfsHash), '_blank')}
                         >
                           <ExternalLink className="h-3 w-3" />
                         </Button>

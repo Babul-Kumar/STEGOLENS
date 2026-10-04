@@ -1,0 +1,49 @@
+name: StegoLens CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  validate-and-test:
+    name: Build, Lint, and Automated Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch torchvision
+          pip install --no-cache-dir timm pillow numpy exifread
+
+      - name: Run TypeScript typecheck
+        run: npm run check
+
+      - name: Run Phase D Upload Security Suite
+        run: npx tsx server/tests/upload-security.test.ts
+
+      - name: Run Phase E/E.1/F Forensics, ML & API Suite
+        run: npx tsx server/tests/forensics-analysis.test.ts
+
+      - name: Run Production Bundle Build
+        run: npm run build
